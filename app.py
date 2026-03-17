@@ -590,12 +590,23 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer, CrossEncoder
 
-# ---------- PAGE CONFIG ----------
-st.set_page_config(layout="wide")
+# ---------------- PAGE CONFIG ----------------
 
-# ---------- CSS ----------
+st.set_page_config(layout="wide", initial_sidebar_state="auto")
+
+# ---------------- CSS ----------------
+
 st.markdown("""
 <style>
+
+header div:nth-child(2){
+display:none !important;
+}
+
+[data-testid="stHeader"]{
+background:rgba(0,0,0,0);
+}
+
 .center{
 display:flex;
 justify-content:center;
@@ -603,16 +614,8 @@ align-items:center;
 flex-direction:column;
 text-align:center;
 }
-</style>
-""", unsafe_allow_html=True)
 
-# ---------- HEADER ----------
-st.markdown("""
-<div class="center">
-<img src="https://github.com/UzunDemir/mnist_777/blob/main/200w.gif?raw=true">
-<h1>TEST-PASSER AI</h1>
-<p>RAG assistant for exam preparation</p>
-</div>
+</style>
 """, unsafe_allow_html=True)
 
 # ---------- SIDEBAR ----------
