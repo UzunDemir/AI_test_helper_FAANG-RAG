@@ -1,12 +1,9 @@
-# app.py
-
 import os
 import streamlit as st
 import requests
 import tempfile
 import numpy as np
 import faiss
-import time
 
 from datetime import datetime
 from PyPDF2 import PdfReader
@@ -20,7 +17,7 @@ from sentence_transformers import SentenceTransformer, CrossEncoder
 
 st.set_page_config(layout="wide", initial_sidebar_state="auto")
 
-# ---------------- CSS убрал header ---------------- 
+# ---------------- CSS ----------------
 
 st.markdown("""
 <style>
@@ -46,13 +43,10 @@ text-align:center;
 
 # ---------------- SIDEBAR ----------------
 
-st.sidebar.title("Описание проекта")
-
 st.sidebar.title("TEST-passer")
 st.sidebar.divider()
 
 st.sidebar.write("""
-
 AI ассистент для прохождения тестов.
 
 Как работает:
@@ -69,38 +63,34 @@ AI ассистент для прохождения тестов.
 • Hybrid retrieval  
 • HyDE query expansion  
 • Cross-encoder reranking  
-
 """)
 
-# ---------------- HEADER только левый слайд ----------------
+# ---------------- HEADER ----------------
 
 st.markdown("""
-
 <div class="center">
 
 <img src="https://github.com/UzunDemir/mnist_777/blob/main/200w.gif?raw=true">
 
 <h1>TEST-passer</h1>
-
 <h2>AI ассистент по тестам</h2>
 
 <p>Ответы строго по учебным материалам</p>
 
 </div>
-
 """, unsafe_allow_html=True)
 
 st.divider()
 
 # ---------------- MODEL CACHE ----------------
 
-@st.cache_resource # загружаем модель один раз
+@st.cache_resource
 def load_embedder():
-    return SentenceTransformer("all-MiniLM-L6-v2") # Embedder
+    return SentenceTransformer("all-MiniLM-L6-v2")
 
-@st.cache_resource # тоже
+@st.cache_resource
 def load_reranker():
-    return CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2") # Reranker
+    return CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
 
 embedder = load_embedder()
 reranker = load_reranker()
@@ -133,7 +123,6 @@ class KnowledgeBase:
     def __init__(self):
 
         self.chunks=[]
-        self.embeddings=[]
         self.index=None
 
         self.vectorizer=TfidfVectorizer()
@@ -144,41 +133,20 @@ class KnowledgeBase:
 
     # ---------- CHUNK ----------
 
-    # def split_text(self,text,max_chars=1500):
-
-    #     parts=text.split("\n\n") # по прараграфам
-
-    #     chunks=[]
-    #     current=""
-
-    #     for p in parts:
-
-    #         if len(current)+len(p)<max_chars:
-    #             current+=p+"\n\n"
-    #         else:
-    #             chunks.append(current)
-    #             current=p
-
-    #     if current:
-    #         chunks.append(current)
-
-    #     return chunks
-
-
     def split_text(self,text,chunk_size=900,overlap=200):
 
-        words = text.split()
-    
+        words=text.split()
+
         chunks=[]
         i=0
-    
+
         while i < len(words):
-    
+
             chunk=" ".join(words[i:i+chunk_size])
             chunks.append(chunk)
-    
+
             i += chunk_size - overlap
-    
+
         return chunks
 
     # ---------- PDF ----------
@@ -195,6 +163,9 @@ class KnowledgeBase:
 
             reader=PdfReader(tmp)
 
+            new_chunks=[]
+            new_texts=[]
+
             for i,page in enumerate(reader.pages):
 
                 text=page.extract_text()
@@ -203,49 +174,37 @@ class KnowledgeBase:
 
                     chunks=self.split_text(text)
 
-                    # for c in chunks:
+                    for c in chunks:
 
-                    #     obj=DocumentChunk(c,name,i+1)
+                        obj=DocumentChunk(c,name,i+1)
 
-                    #     self.chunks.append(obj)
-                    #     self.texts.append(c)
+                        new_chunks.append(obj)
+                        new_texts.append(c)
 
-                    #     emb=embedder.encode(c)
+            if not new_chunks:
+                return False
 
-                    #     self.embeddings.append(emb)
+            # embeddings batch
+            embs=embedder.encode(new_texts,batch_size=32)
 
+            vectors=np.array(embs).astype("float32")
 
-                    embs = embedder.encode(chunks, batch_size=32)
+            # FAISS
+            if self.index is None:
 
-                    for c, emb in zip(chunks, embs):
-                    
-                        obj = DocumentChunk(c, name, i+1)
-                    
-                        self.chunks.append(obj)
-                        self.texts.append(c)
-                        self.embeddings.append(emb)
+                dim=vectors.shape[1]
+                self.index=faiss.IndexFlatL2(dim)
 
-            self.files.append(name)
+            self.index.add(vectors)
+
+            # сохраняем chunks
+            self.chunks.extend(new_chunks)
+            self.texts.extend(new_texts)
 
             # TFIDF
             self.tfidf=self.vectorizer.fit_transform(self.texts)
 
-            # FAISS
-            vectors=np.array(self.embeddings).astype("float32")
-
-            # dim=vectors.shape[1]
-
-            # self.index=faiss.IndexFlatL2(dim)
-            # self.index.add(vectors)
-
-            vectors = np.array(self.embeddings).astype("float32")
-
-            if self.index is None:
-            
-                dim = vectors.shape[1]
-                self.index = faiss.IndexFlatL2(dim)
-            
-            self.index.add(vectors)
+            self.files.append(name)
 
             return True
 
@@ -296,13 +255,26 @@ Answer:
 
     def semantic(self,query,k=6):
 
+        if self.index is None:
+            return []
+
         q=embedder.encode([query]).astype("float32")
 
         d,i=self.index.search(q,k)
 
-        return [self.chunks[x] for x in i[0]]
+        results=[]
+
+        for idx in i[0]:
+
+            if idx < len(self.chunks):
+                results.append(self.chunks[idx])
+
+        return results
 
     def keyword(self,query,k=6):
+
+        if self.tfidf is None:
+            return []
 
         q=self.vectorizer.transform([query])
 
@@ -340,19 +312,12 @@ Answer:
 # ---------------- SESSION ----------------
 
 if "kb" not in st.session_state:
-    st.session_state.kb = KnowledgeBase()
-else:
-    if not hasattr(st.session_state.kb, "files"):
-        st.session_state.kb = KnowledgeBase()
+    st.session_state.kb=KnowledgeBase()
 
 if "messages" not in st.session_state:
     st.session_state.messages=[]
 
 kb=st.session_state.kb
-
-@st.cache_data(show_spinner=False)
-def cached_retrieve(query):
-    return kb.retrieve(query)
 
 # ---------------- FILE UPLOAD ----------------
 
@@ -391,7 +356,6 @@ else:
 for m in st.session_state.messages:
 
     with st.chat_message(m["role"]):
-
         st.markdown(m["content"])
 
 # ---------------- CHAT INPUT ----------------
@@ -405,15 +369,11 @@ if prompt:=st.chat_input("Введите вопрос"):
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    #start=datetime.now()
     start=datetime.now()
 
     with st.spinner("🔎 AI анализирует материалы..."):
-        
-        #chunks = kb.retrieve(prompt)
-        chunks=cached_retrieve(prompt)
 
-    #chunks=kb.retrieve(prompt)
+        chunks=kb.retrieve(prompt)
 
     if not chunks:
 
@@ -422,11 +382,11 @@ if prompt:=st.chat_input("Введите вопрос"):
     else:
 
         context=""
-        MAX_CONTEXT = 6000
+        MAX_CONTEXT=6000
 
         for c in chunks:
-            
-            if len(context) > MAX_CONTEXT:
+
+            if len(context)>MAX_CONTEXT:
                 break
 
             context+=f"""
@@ -454,45 +414,28 @@ Materials:
         "max_tokens":1000
         }
 
-        # r=requests.post(url,headers=headers,json=data,timeout=60)
-
-        # answer=r.json()['choices'][0]['message']['content']
-
         with st.spinner("🤖 AI формирует ответ..."):
-
-            # r=requests.post(url,headers=headers,json=data,timeout=60)
-        
-            # answer=r.json()['choices'][0]['message']['content']
 
             try:
 
                 r=requests.post(url,headers=headers,json=data,timeout=60)
-            
+
                 if r.status_code==200:
                     answer=r.json()['choices'][0]['message']['content']
                 else:
                     answer="⚠️ Ошибка AI сервера"
-            
-            except Exception:
+
+            except:
                 answer="⚠️ Ошибка соединения с AI"
-
-
-
-            
-
-        # sources="\n\nИсточники:\n"
-
-        # for c in chunks:
-        #     sources+=f"- {c.doc}, стр {c.page}\n"
 
         sources="\n\nИсточники:\n"
 
         unique=set()
-        
+
         for c in chunks:
-        
+
             key=f"{c.doc}, стр {c.page}"
-        
+
             if key not in unique:
                 unique.add(key)
                 sources+=f"- {key}\n"
@@ -519,8 +462,7 @@ if st.button("Очистить чат"):
     st.session_state.messages=[]
     st.rerun()
 
-
 if st.button("Удалить документы"):
 
-    st.session_state.kb = KnowledgeBase()
+    st.session_state.kb=KnowledgeBase()
     st.rerun()
