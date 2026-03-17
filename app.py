@@ -216,9 +216,18 @@ class KnowledgeBase:
             # FAISS
             vectors=np.array(self.embeddings).astype("float32")
 
-            dim=vectors.shape[1]
+            # dim=vectors.shape[1]
 
-            self.index=faiss.IndexFlatL2(dim)
+            # self.index=faiss.IndexFlatL2(dim)
+            # self.index.add(vectors)
+
+            vectors = np.array(self.embeddings).astype("float32")
+
+            if self.index is None:
+            
+                dim = vectors.shape[1]
+                self.index = faiss.IndexFlatL2(dim)
+            
             self.index.add(vectors)
 
             return True
