@@ -437,10 +437,22 @@ Materials:
         
             answer=r.json()['choices'][0]['message']['content']
 
+        # sources="\n\nИсточники:\n"
+
+        # for c in chunks:
+        #     sources+=f"- {c.doc}, стр {c.page}\n"
+
         sources="\n\nИсточники:\n"
 
+        unique=set()
+        
         for c in chunks:
-            sources+=f"- {c.doc}, стр {c.page}\n"
+        
+            key=f"{c.doc}, стр {c.page}"
+        
+            if key not in unique:
+                unique.add(key)
+                sources+=f"- {key}\n"
 
         answer+=sources
 
