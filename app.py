@@ -516,3 +516,9 @@ if st.button("Очистить чат"):
 
     st.session_state.messages=[]
     st.rerun()
+
+
+if st.button("Удалить документы"):
+
+    st.session_state.kb = KnowledgeBase()
+    st.rerun()
