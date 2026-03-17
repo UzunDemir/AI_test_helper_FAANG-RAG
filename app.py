@@ -589,32 +589,23 @@ from PyPDF2 import PdfReader
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer, CrossEncoder
+from functools import lru_cache
 
 # ---------------- PAGE CONFIG ----------------
-
 st.set_page_config(layout="wide", initial_sidebar_state="auto")
 
 # ---------------- CSS ----------------
-
 st.markdown("""
 <style>
-
-header div:nth-child(2){
-display:none !important;
-}
-
-[data-testid="stHeader"]{
-background:rgba(0,0,0,0);
-}
-
+header div:nth-child(2){ display:none !important; }
+[data-testid="stHeader"]{ background:rgba(0,0,0,0); }
 .center{
-display:flex;
-justify-content:center;
-align-items:center;
-flex-direction:column;
-text-align:center;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    flex-direction:column;
+    text-align:center;
 }
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -630,20 +621,15 @@ Features:
 • Cross-Encoder Rerank  
 • Memory Retrieval  
 """)
-
+st.sidebar.markdown("---")
 
 # ---------------- HEADER ----------------
-
 st.markdown("""
 <div class="center">
-
 <img src="https://github.com/UzunDemir/mnist_777/blob/main/200w.gif?raw=true">
-
 <h1>TEST-passer</h1>
 <h2>AI ассистент по тестам</h2>
-
 <p>Ответы строго по учебным материалам</p>
-
 </div>
 """, unsafe_allow_html=True)
 
@@ -668,9 +654,10 @@ headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/js
 
 # ---------- MEMORY ----------
 class ConversationMemory:
-    def __init__(self):
+    def __init__(self, max_messages=50):
         self.messages = []
         self.embeddings = None
+        self.max_messages = max_messages
 
     def add(self, text):
         if not text or not text.strip():
@@ -681,14 +668,17 @@ class ConversationMemory:
         else:
             self.embeddings = np.vstack([self.embeddings, emb])
         self.messages.append(text)
+        if len(self.messages) > self.max_messages:
+            self.messages.pop(0)
+            self.embeddings = np.vstack([embedder.encode(self.messages)])  # Rebuild embeddings
 
     def search(self, query, k=3):
-        if self.embeddings is None:
+        if self.embeddings is None or not self.messages:
             return []
         q = embedder.encode([query])
         sims = cosine_similarity(q, self.embeddings)[0]
         idx = np.argsort(sims)[-k:]
-        return [self.messages[i] for i in idx if self.messages[i] and self.messages[i].strip()]
+        return [self.messages[i] for i in idx if self.messages[i].strip()]
 
 # ---------- KNOWLEDGE BASE ----------
 class KnowledgeBase:
@@ -718,8 +708,7 @@ class KnowledgeBase:
                 t.write(data)
                 tmp = t.name
             reader = PdfReader(tmp)
-            new_chunks = []
-            new_texts = []
+            new_chunks, new_texts = [], []
             for page in reader.pages:
                 text = page.extract_text()
                 if text:
@@ -744,40 +733,39 @@ class KnowledgeBase:
                 os.remove(tmp)
 
     def semantic(self, query, k=5):
-        if self.index is None:
+        if self.index is None or not self.chunks:
             return []
         v = embedder.encode([query]).astype("float32")
         d, i = self.index.search(v, k)
         result = []
         for idx in i[0]:
-            if idx < len(self.chunks) and self.chunks[idx] and self.chunks[idx].strip():
+            if idx < len(self.chunks) and self.chunks[idx].strip():
                 result.append(self.chunks[idx])
         return result
 
     def keyword(self, query, k=5):
-        if self.tfidf is None:
+        if self.tfidf is None or not self.chunks:
             return []
         vec = self.vectorizer.transform([query])
         sims = cosine_similarity(vec, self.tfidf)[0]
         idx = np.argsort(sims)[-k:]
-        result = []
-        for i in idx:
-            if i < len(self.chunks) and self.chunks[i] and self.chunks[i].strip():
-                result.append(self.chunks[i])
-        return result
+        return [self.chunks[i] for i in idx if i < len(self.chunks) and self.chunks[i].strip()]
 
     def retrieve(self, query, top_k=4):
         sem = self.semantic(query)
         key = self.keyword(query)
-        unique = list({t for t in sem + key if isinstance(t, str) and t.strip()})
+        unique = list({t for t in sem + key if t.strip()})
         if not unique:
             return []
         pairs = [[query, t] for t in unique]
         scores = reranker.predict(pairs)
         ranked = sorted(zip(unique, scores), key=lambda x: x[1], reverse=True)
+        # Debug log
+        st.session_state.reranker_log = [(text[:50]+"...", float(score)) for text, score in ranked]
         return [x[0] for x in ranked[:top_k]]
 
 # ---------- SELF-RAG ----------
+@lru_cache(maxsize=128)
 def self_rag(query):
     prompt = f"""
 Decide if the question requires document retrieval.
@@ -799,6 +787,7 @@ NO_SEARCH
         return True
 
 # ---------- QUERY ROUTER ----------
+@lru_cache(maxsize=128)
 def route_query(query):
     prompt = f"""
 Classify the query.
@@ -824,9 +813,11 @@ Answer with one word.
 if "kb" not in st.session_state:
     st.session_state.kb = KnowledgeBase()
 if "memory" not in st.session_state:
-    st.session_state.memory = ConversationMemory()
+    st.session_state.memory = ConversationMemory(max_messages=50)
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "reranker_log" not in st.session_state:
+    st.session_state.reranker_log = []
 
 kb = st.session_state.kb
 memory = st.session_state.memory
@@ -836,7 +827,7 @@ files = st.file_uploader("Upload PDFs", type="pdf", accept_multiple_files=True)
 if files:
     for f in files:
         if f.name not in kb.files:
-            with st.spinner("Processing PDF..."):
+            with st.spinner(f"Processing {f.name}..."):
                 kb.load_pdf(f.read(), f.name)
             st.success(f"{f.name} added")
 
@@ -851,37 +842,46 @@ if prompt := st.chat_input("Ask question"):
     memory.add(prompt)
     with st.chat_message("user"):
         st.markdown(prompt)
+
     start = datetime.now()
     route = route_query(prompt)
     context = ""
+
     if route == "DOCUMENT" and self_rag(prompt):
         with st.spinner("Searching documents..."):
             docs = kb.retrieve(prompt)
             if docs:
-                docs = [d for d in docs if isinstance(d, str) and d.strip()]
                 context += "\n".join(docs)
     elif route == "CONVERSATION":
         mem = memory.search(prompt)
         if mem:
             context += "\n".join(mem)
+
     llm_prompt = f"Answer the question.\n\nContext:\n{context}\n\nQuestion:\n{prompt}"
     data = {"model":"deepseek-chat","messages":[{"role":"user","content":llm_prompt}],"temperature":0.1}
+
     with st.spinner("AI thinking..."):
         try:
             r = requests.post(url, headers=headers, json=data, timeout=60)
             answer = r.json()['choices'][0]['message']['content']
         except:
             answer = "⚠️ AI server error or connection failed."
+
     memory.add(answer)
     st.session_state.messages.append({"role":"assistant","content":answer})
+
     with st.chat_message("assistant"):
         placeholder = st.empty()
-        txt = ""
-        for w in answer.split():
-            txt += w + " "
-            placeholder.markdown(txt)
+        # Render by paragraph to speed up long answers
+        for para in answer.split("\n"):
+            placeholder.markdown(para)
+    
     end = datetime.now()
     st.info(f"⏱ {(end-start).total_seconds():.2f} sec")
+
+# ---------- DEBUG LOG ----------
+if st.sidebar.checkbox("Show reranker log"):
+    st.sidebar.write(st.session_state.reranker_log)
 
 # ---------- CLEAR ----------
 if st.button("Clear chat"):
@@ -889,5 +889,5 @@ if st.button("Clear chat"):
     st.rerun()
 if st.button("Remove documents"):
     st.session_state.kb = KnowledgeBase()
-    st.session_state.memory = ConversationMemory()
+    st.session_state.memory = ConversationMemory(max_messages=50)
     st.rerun()
