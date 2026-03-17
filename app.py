@@ -681,15 +681,120 @@ class ConversationMemory:
         return [self.messages[i] for i in idx if self.messages[i].strip()]
 
 # ---------- KNOWLEDGE BASE ----------
+# class KnowledgeBase:
+#     def __init__(self, nlist=100):
+#         self.chunks = []
+#         self.texts = []
+#         self.files = []
+#         self.index = None
+#         self.vectorizer = TfidfVectorizer()
+#         self.tfidf = None
+#         self.nlist = nlist  # FAISS cluster count
+
+#     def split_text(self, text, chunk_size=800, overlap=150):
+#         words = text.split()
+#         chunks = []
+#         i = 0
+#         while i < len(words):
+#             chunk = " ".join(words[i:i+chunk_size])
+#             if chunk.strip():
+#                 chunks.append(chunk)
+#             i += chunk_size - overlap
+#         return chunks
+
+#     def load_pdf(self, data, name):
+#         tmp = None
+#         try:
+#             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as t:
+#                 t.write(data)
+#                 tmp = t.name
+    
+#             reader = PdfReader(tmp)
+#             new_chunks, new_texts = [], []
+    
+#             for page in reader.pages:
+#                 text = page.extract_text()
+#                 if text:
+#                     for c in self.split_text(text):
+#                         new_chunks.append(c)
+#                         new_texts.append(c)
+    
+#             if not new_chunks:
+#                 return False
+    
+#             emb = embedder.encode(new_texts)
+#             vectors = np.array(emb).astype("float32")
+#             dim = vectors.shape[1]
+    
+#             # ------------------ FAISS SAFE ------------------
+#             if len(vectors) < 5:  # слишком мало для IVFFlat
+#                 # используем простой IndexFlatL2
+#                 if self.index is None:
+#                     self.index = faiss.IndexFlatL2(dim)
+#                 self.index.add(vectors)
+#             else:
+#                 # IVFFlat для больших PDF
+#                 nlist_train = min(self.nlist, len(vectors))
+#                 if self.index is None:
+#                     quantizer = faiss.IndexFlatL2(dim)
+#                     self.index = faiss.IndexIVFFlat(quantizer, dim, nlist_train, faiss.METRIC_L2)
+#                     self.index.train(vectors)
+#                 elif not self.index.is_trained:
+#                     self.index.train(vectors)
+#                 self.index.add(vectors)
+    
+#             self.chunks += new_chunks
+#             self.texts += new_texts
+#             self.tfidf = self.vectorizer.fit_transform(self.texts)
+#             self.files.append(name)
+    
+#             return True
+    
+#         finally:
+#             if tmp and os.path.exists(tmp):
+#                 os.remove(tmp)
+
+#     def semantic(self, query, k=5):
+#         if self.index is None or not self.chunks:
+#             return []
+#         v = embedder.encode([query]).astype("float32")
+#         d, i = self.index.search(v, k)
+#         result = []
+#         for idx in i[0]:
+#             if idx < len(self.chunks) and self.chunks[idx].strip():
+#                 result.append(self.chunks[idx])
+#         return result
+
+#     def keyword(self, query, k=5):
+#         if self.tfidf is None or not self.chunks:
+#             return []
+#         vec = self.vectorizer.transform([query])
+#         sims = cosine_similarity(vec, self.tfidf)[0]
+#         idx = np.argsort(sims)[-k:]
+#         return [self.chunks[i] for i in idx if i < len(self.chunks) and self.chunks[i].strip()]
+
+#     def retrieve(self, query, top_k=4):
+#         sem = self.semantic(query)
+#         key = self.keyword(query)
+#         unique = list({t for t in sem + key if t.strip()})
+#         if not unique:
+#             return []
+#         pairs = [[query, t] for t in unique]
+#         scores = reranker.predict(pairs)
+#         ranked = sorted(zip(unique, scores), key=lambda x: x[1], reverse=True)
+#         st.session_state.reranker_log = [(text[:50]+"...", float(score)) for text, score in ranked]
+#         return [x[0] for x in ranked[:top_k]]
+
+
 class KnowledgeBase:
     def __init__(self, nlist=100):
-        self.chunks = []
-        self.texts = []
+        self.chunks = []  # хранит tuple: (text, file, page)
+        self.texts = []   # для векторов и TF-IDF
         self.files = []
         self.index = None
         self.vectorizer = TfidfVectorizer()
         self.tfidf = None
-        self.nlist = nlist  # FAISS cluster count
+        self.nlist = nlist
 
     def split_text(self, text, chunk_size=800, overlap=150):
         words = text.split()
@@ -708,32 +813,30 @@ class KnowledgeBase:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as t:
                 t.write(data)
                 tmp = t.name
-    
+
             reader = PdfReader(tmp)
             new_chunks, new_texts = [], []
-    
-            for page in reader.pages:
+
+            for page_num, page in enumerate(reader.pages, 1):
                 text = page.extract_text()
                 if text:
                     for c in self.split_text(text):
-                        new_chunks.append(c)
+                        new_chunks.append((c, name, page_num))  # сохраняем источник и страницу
                         new_texts.append(c)
-    
+
             if not new_chunks:
                 return False
-    
+
             emb = embedder.encode(new_texts)
             vectors = np.array(emb).astype("float32")
             dim = vectors.shape[1]
-    
-            # ------------------ FAISS SAFE ------------------
-            if len(vectors) < 5:  # слишком мало для IVFFlat
-                # используем простой IndexFlatL2
+
+            # SAFE FAISS
+            if len(vectors) < 5:
                 if self.index is None:
                     self.index = faiss.IndexFlatL2(dim)
                 self.index.add(vectors)
             else:
-                # IVFFlat для больших PDF
                 nlist_train = min(self.nlist, len(vectors))
                 if self.index is None:
                     quantizer = faiss.IndexFlatL2(dim)
@@ -742,14 +845,13 @@ class KnowledgeBase:
                 elif not self.index.is_trained:
                     self.index.train(vectors)
                 self.index.add(vectors)
-    
+
             self.chunks += new_chunks
             self.texts += new_texts
             self.tfidf = self.vectorizer.fit_transform(self.texts)
             self.files.append(name)
-    
+
             return True
-    
         finally:
             if tmp and os.path.exists(tmp):
                 os.remove(tmp)
@@ -761,8 +863,10 @@ class KnowledgeBase:
         d, i = self.index.search(v, k)
         result = []
         for idx in i[0]:
-            if idx < len(self.chunks) and self.chunks[idx].strip():
-                result.append(self.chunks[idx])
+            if idx < len(self.chunks):
+                text, file, page = self.chunks[idx]
+                if text.strip():
+                    result.append(f"[{file} | page {page}] {text}")
         return result
 
     def keyword(self, query, k=5):
@@ -771,7 +875,13 @@ class KnowledgeBase:
         vec = self.vectorizer.transform([query])
         sims = cosine_similarity(vec, self.tfidf)[0]
         idx = np.argsort(sims)[-k:]
-        return [self.chunks[i] for i in idx if i < len(self.chunks) and self.chunks[i].strip()]
+        result = []
+        for i in idx:
+            if i < len(self.chunks):
+                text, file, page = self.chunks[i]
+                if text.strip():
+                    result.append(f"[{file} | page {page}] {text}")
+        return result
 
     def retrieve(self, query, top_k=4):
         sem = self.semantic(query)
@@ -782,8 +892,9 @@ class KnowledgeBase:
         pairs = [[query, t] for t in unique]
         scores = reranker.predict(pairs)
         ranked = sorted(zip(unique, scores), key=lambda x: x[1], reverse=True)
-        st.session_state.reranker_log = [(text[:50]+"...", float(score)) for text, score in ranked]
         return [x[0] for x in ranked[:top_k]]
+
+
 
 # ---------- SELF-RAG ----------
 @lru_cache(maxsize=128)
