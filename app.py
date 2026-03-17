@@ -350,6 +350,10 @@ if "messages" not in st.session_state:
 
 kb=st.session_state.kb
 
+@st.cache_data(show_spinner=False)
+def cached_retrieve(query):
+    return kb.retrieve(query)
+
 # ---------------- FILE UPLOAD ----------------
 
 files=st.file_uploader(
