@@ -416,6 +416,7 @@ if prompt:=st.chat_input("Введите вопрос"):
     else:
 
         context=""
+        MAX_CONTEXT = 6000
 
         for c in chunks:
 
