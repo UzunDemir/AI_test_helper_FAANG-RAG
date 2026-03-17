@@ -419,6 +419,9 @@ if prompt:=st.chat_input("Введите вопрос"):
         MAX_CONTEXT = 6000
 
         for c in chunks:
+            
+            if len(context) > MAX_CONTEXT:
+                break
 
             context+=f"""
 Документ: {c.doc}
