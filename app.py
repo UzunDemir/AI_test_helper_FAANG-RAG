@@ -144,24 +144,41 @@ class KnowledgeBase:
 
     # ---------- CHUNK ----------
 
-    def split_text(self,text,max_chars=1500):
+    # def split_text(self,text,max_chars=1500):
 
-        parts=text.split("\n\n") # по прараграфам
+    #     parts=text.split("\n\n") # по прараграфам
 
+    #     chunks=[]
+    #     current=""
+
+    #     for p in parts:
+
+    #         if len(current)+len(p)<max_chars:
+    #             current+=p+"\n\n"
+    #         else:
+    #             chunks.append(current)
+    #             current=p
+
+    #     if current:
+    #         chunks.append(current)
+
+    #     return chunks
+
+
+    def split_text(self,text,chunk_size=900,overlap=200):
+
+        words = text.split()
+    
         chunks=[]
-        current=""
-
-        for p in parts:
-
-            if len(current)+len(p)<max_chars:
-                current+=p+"\n\n"
-            else:
-                chunks.append(current)
-                current=p
-
-        if current:
-            chunks.append(current)
-
+        i=0
+    
+        while i < len(words):
+    
+            chunk=" ".join(words[i:i+chunk_size])
+            chunks.append(chunk)
+    
+            i += chunk_size - overlap
+    
         return chunks
 
     # ---------- PDF ----------
