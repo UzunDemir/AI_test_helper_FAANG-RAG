@@ -315,12 +315,15 @@ if prompt := st.chat_input("Ask question"):
 
     if route == "DOCUMENT" and self_rag(prompt):
         with st.spinner("Searching documents..."):
-            context_chunks = kb.retrieve(prompt)  # список tuple: (text, "[file | page]")
-            if context_chunks:
-                # формируем строку с текстом и источником для LLM
-                context_text = "\n".join([f"{t} ({fp})" for t, fp in context_chunks])
-            else:
-                context_text = ""
+            context_chunks = kb.retrieve(prompt)  # может быть tuple или просто текст
+            context_text = ""
+            for chunk in context_chunks:
+                if isinstance(chunk, tuple) and len(chunk) == 2:
+                    text, source = chunk
+                    context_text += f"{text} ({source})\n"
+                else:
+                    # на случай старых версий, просто добавляем текст
+                    context_text += f"{chunk}\n"
     elif route == "CONVERSATION":
         mem = memory.search(prompt)
         if mem:
