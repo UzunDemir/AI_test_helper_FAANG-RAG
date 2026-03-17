@@ -186,15 +186,26 @@ class KnowledgeBase:
 
                     chunks=self.split_text(text)
 
-                    for c in chunks:
+                    # for c in chunks:
 
-                        obj=DocumentChunk(c,name,i+1)
+                    #     obj=DocumentChunk(c,name,i+1)
 
+                    #     self.chunks.append(obj)
+                    #     self.texts.append(c)
+
+                    #     emb=embedder.encode(c)
+
+                    #     self.embeddings.append(emb)
+
+
+                    embs = embedder.encode(chunks, batch_size=32)
+
+                    for c, emb in zip(chunks, embs):
+                    
+                        obj = DocumentChunk(c, name, i+1)
+                    
                         self.chunks.append(obj)
                         self.texts.append(c)
-
-                        emb=embedder.encode(c)
-
                         self.embeddings.append(emb)
 
             self.files.append(name)
