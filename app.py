@@ -594,24 +594,12 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer, CrossEncoder
 
 
-# ---------------- PAGE CONFIG ----------------
+st.set_page_config(layout="wide")
 
-st.set_page_config(layout="wide", initial_sidebar_state="auto")
-
-
-# ---------------- CSS ----------------
+# ---------- CSS ----------
 
 st.markdown("""
 <style>
-
-header div:nth-child(2){
-display:none !important;
-}
-
-[data-testid="stHeader"]{
-background:rgba(0,0,0,0);
-}
-
 .center{
 display:flex;
 justify-content:center;
@@ -619,52 +607,39 @@ align-items:center;
 flex-direction:column;
 text-align:center;
 }
-
 </style>
 """, unsafe_allow_html=True)
 
 
-# ---------------- SIDEBAR ----------------
-
-st.sidebar.title("TEST-passer")
-st.sidebar.divider()
-
-st.sidebar.write("""
-AI ассистент для прохождения тестов.
-
-Pipeline:
-
-• RAG architecture  
-• FAISS semantic search  
-• TF-IDF keyword search  
-• Hybrid retrieval  
-• HyDE query expansion  
-• Multi-query retrieval  
-• Cross-encoder reranking  
-• Context compression  
-• Answer verification  
-""")
-
-
-# ---------------- HEADER ----------------
+# ---------- HEADER ----------
 
 st.markdown("""
 <div class="center">
-
 <img src="https://github.com/UzunDemir/mnist_777/blob/main/200w.gif?raw=true">
-
-<h1>TEST-passer</h1>
-<h3>AI ассистент по тестам</h3>
-
-<p>Ответы строго по учебным материалам</p>
-
+<h1>TEST-PASSER AI</h1>
+<p>RAG assistant for exam preparation</p>
 </div>
 """, unsafe_allow_html=True)
 
-st.divider()
+
+# ---------- SIDEBAR ----------
+
+st.sidebar.title("AI Pipeline")
+
+st.sidebar.write("""
+Features:
+
+• Self-RAG  
+• Query Routing  
+• Hybrid Retrieval  
+• HyDE Expansion  
+• Multi Query  
+• Cross-Encoder Rerank  
+• Memory Retrieval  
+""")
 
 
-# ---------------- LOAD MODELS ----------------
+# ---------- MODELS ----------
 
 @st.cache_resource
 def load_embedder():
@@ -678,30 +653,55 @@ embedder = load_embedder()
 reranker = load_reranker()
 
 
-# ---------------- API ----------------
+# ---------- API ----------
 
 api_key = st.secrets.get("DEEPSEEK_API_KEY")
 
 url = "https://api.deepseek.com/v1/chat/completions"
 
 headers = {
-"Authorization": f"Bearer {api_key}",
-"Content-Type": "application/json"
+"Authorization":f"Bearer {api_key}",
+"Content-Type":"application/json"
 }
 
 
-# ---------------- DATA STRUCTURE ----------------
+# ---------- MEMORY ----------
 
-class Chunk:
+class ConversationMemory:
 
-    def __init__(self,text,doc,page):
+    def __init__(self):
 
-        self.text=text
-        self.doc=doc
-        self.page=page
+        self.messages=[]
+        self.embeddings=None
 
 
-# ---------------- KNOWLEDGE BASE ----------------
+    def add(self,text):
+
+        emb=embedder.encode([text])
+
+        if self.embeddings is None:
+            self.embeddings=emb
+        else:
+            self.embeddings=np.vstack([self.embeddings,emb])
+
+        self.messages.append(text)
+
+
+    def search(self,query,k=3):
+
+        if self.embeddings is None:
+            return []
+
+        q=embedder.encode([query])
+
+        sims=cosine_similarity(q,self.embeddings)[0]
+
+        idx=np.argsort(sims)[-k:]
+
+        return [self.messages[i] for i in idx]
+
+
+# ---------- KB ----------
 
 class KnowledgeBase:
 
@@ -717,9 +717,7 @@ class KnowledgeBase:
         self.tfidf=None
 
 
-    # ---------- CHUNKING ----------
-
-    def split_text(self,text,chunk_size=800,overlap=150):
+    def split(self,text,size=800,overlap=150):
 
         words=text.split()
 
@@ -727,26 +725,24 @@ class KnowledgeBase:
 
         i=0
 
-        while i < len(words):
+        while i<len(words):
 
-            chunk=" ".join(words[i:i+chunk_size])
-            chunks.append(chunk)
+            chunks.append(" ".join(words[i:i+size]))
 
-            i += chunk_size-overlap
+            i+=size-overlap
 
         return chunks
 
 
-    # ---------- LOAD PDF ----------
-
-    def load_pdf(self,content,name):
+    def load_pdf(self,data,name):
 
         tmp=None
 
         try:
 
             with tempfile.NamedTemporaryFile(delete=False,suffix=".pdf") as t:
-                t.write(content)
+
+                t.write(data)
                 tmp=t.name
 
             reader=PdfReader(tmp)
@@ -754,35 +750,34 @@ class KnowledgeBase:
             new_chunks=[]
             new_texts=[]
 
-            for i,page in enumerate(reader.pages):
+            for p,page in enumerate(reader.pages):
 
                 text=page.extract_text()
 
                 if text:
 
-                    chunks=self.split_text(text)
+                    for c in self.split(text):
 
-                    for c in chunks:
-
-                        new_chunks.append(Chunk(c,name,i+1))
+                        new_chunks.append(c)
                         new_texts.append(c)
 
             if not new_chunks:
                 return False
 
-            embeddings=embedder.encode(new_texts,batch_size=32)
+            emb=embedder.encode(new_texts)
 
-            vectors=np.array(embeddings).astype("float32")
+            vectors=np.array(emb).astype("float32")
 
             if self.index is None:
 
                 dim=vectors.shape[1]
+
                 self.index=faiss.IndexFlatL2(dim)
 
             self.index.add(vectors)
 
-            self.chunks.extend(new_chunks)
-            self.texts.extend(new_texts)
+            self.chunks+=new_chunks
+            self.texts+=new_texts
 
             self.tfidf=self.vectorizer.fit_transform(self.texts)
 
@@ -796,176 +791,143 @@ class KnowledgeBase:
                 os.remove(tmp)
 
 
-    # ---------- HYDE ----------
+    # ---------- HYBRID SEARCH ----------
 
-    def hyde(self,query):
-
-        prompt=f"""
-Write a short paragraph answering the question.
-
-Question:
-{query}
-"""
-
-        data={
-        "model":"deepseek-chat",
-        "messages":[{"role":"user","content":prompt}],
-        "max_tokens":120
-        }
-
-        try:
-
-            r=requests.post(url,headers=headers,json=data,timeout=30)
-
-            if r.status_code==200:
-                return r.json()['choices'][0]['message']['content']
-
-        except:
-            pass
-
-        return query
-
-
-    # ---------- MULTI QUERY ----------
-
-    def multi_query(self,query):
-
-        prompt=f"""
-Generate 3 search queries.
-
-Question:
-{query}
-"""
-
-        queries=[query]
-
-        data={
-        "model":"deepseek-chat",
-        "messages":[{"role":"user","content":prompt}],
-        "max_tokens":120
-        }
-
-        try:
-
-            r=requests.post(url,headers=headers,json=data,timeout=30)
-
-            if r.status_code==200:
-
-                text=r.json()['choices'][0]['message']['content']
-
-                for q in text.split("\n"):
-
-                    q=q.strip("- ").strip()
-
-                    if len(q)>5:
-                        queries.append(q)
-
-        except:
-            pass
-
-        return queries[:4]
-
-
-    # ---------- SEARCH ----------
-
-    def semantic(self,query,k=6):
+    def semantic(self,q,k=5):
 
         if self.index is None:
             return []
 
-        q=embedder.encode([query]).astype("float32")
+        v=embedder.encode([q]).astype("float32")
 
-        d,i=self.index.search(q,k)
+        d,i=self.index.search(v,k)
 
-        results=[]
-
-        for idx in i[0]:
-
-            if 0 <= idx < len(self.chunks):
-                results.append(self.chunks[idx])
-
-        return results
+        return [self.chunks[x] for x in i[0] if x < len(self.chunks)]
 
 
-    def keyword(self,query,k=6):
+    def keyword(self,q,k=5):
 
         if self.tfidf is None:
             return []
 
-        q=self.vectorizer.transform([query])
+        vec=self.vectorizer.transform([q])
 
-        sims=cosine_similarity(q,self.tfidf)
+        sims=cosine_similarity(vec,self.tfidf)[0]
 
-        idx=np.argsort(sims[0])[-k:]
+        idx=np.argsort(sims)[-k:]
 
-        return [self.chunks[i] for i in idx if i < len(self.chunks)]
-
-
-    # ---------- CONTEXT COMPRESSION ----------
-
-    def compress(self,chunks,max_len=1200):
-
-        text=""
-
-        for c in chunks:
-
-            if len(text) > max_len:
-                break
-
-            text+=c.text+"\n"
-
-        return text
+        return [self.chunks[i] for i in idx]
 
 
-    # ---------- RETRIEVE ----------
+    def retrieve(self,q):
 
-    def retrieve(self,query,k=4):
+        sem=self.semantic(q)
 
-        queries=self.multi_query(query)
+        key=self.keyword(q)
 
-        all_chunks=[]
-
-        for q in queries:
-
-            hyp=self.hyde(q)
-
-            search=q+" "+hyp
-
-            all_chunks+=self.semantic(search)
-            all_chunks+=self.keyword(search)
-
-        unique=list({c.text:c for c in all_chunks}.values())
+        unique=list(set(sem+key))
 
         if not unique:
             return []
 
-        pairs=[[query,c.text] for c in unique]
+        pairs=[[q,t] for t in unique]
 
         scores=reranker.predict(pairs)
 
         ranked=sorted(zip(unique,scores),key=lambda x:x[1],reverse=True)
 
-        return [x[0] for x in ranked[:k]]
+        return [x[0] for x in ranked[:4]]
 
 
-# ---------------- SESSION ----------------
+# ---------- SELF RAG ----------
+
+def self_rag(query):
+
+    prompt=f"""
+Decide if the question requires document retrieval.
+
+Question:
+{query}
+
+Answer ONLY:
+
+SEARCH
+or
+NO_SEARCH
+"""
+
+    data={
+    "model":"deepseek-chat",
+    "messages":[{"role":"user","content":prompt}],
+    "max_tokens":10
+    }
+
+    try:
+
+        r=requests.post(url,headers=headers,json=data)
+
+        res=r.json()['choices'][0]['message']['content']
+
+        return "SEARCH" in res
+
+    except:
+
+        return True
+
+
+# ---------- QUERY ROUTER ----------
+
+def route_query(query):
+
+    prompt=f"""
+Classify the query.
+
+Options:
+DOCUMENT
+CONVERSATION
+GENERAL
+
+Query:
+{query}
+
+Answer with one word.
+"""
+
+    data={
+    "model":"deepseek-chat",
+    "messages":[{"role":"user","content":prompt}],
+    "max_tokens":10
+    }
+
+    try:
+
+        r=requests.post(url,headers=headers,json=data)
+
+        return r.json()['choices'][0]['message']['content'].strip()
+
+    except:
+
+        return "DOCUMENT"
+
+
+# ---------- SESSION ----------
 
 if "kb" not in st.session_state:
     st.session_state.kb=KnowledgeBase()
+
+if "memory" not in st.session_state:
+    st.session_state.memory=ConversationMemory()
 
 if "messages" not in st.session_state:
     st.session_state.messages=[]
 
 kb=st.session_state.kb
+memory=st.session_state.memory
 
 
-# ---------------- FILE UPLOAD ----------------
+# ---------- FILE UPLOAD ----------
 
-files=st.file_uploader(
-"Загрузить PDF",
-type="pdf",
-accept_multiple_files=True
-)
+files=st.file_uploader("Upload PDFs",type="pdf",accept_multiple_files=True)
 
 if files:
 
@@ -973,92 +935,77 @@ if files:
 
         if f.name not in kb.files:
 
-            with st.spinner(f"Загрузка {f.name} ..."):
+            with st.spinner("Processing PDF..."):
 
-                ok=kb.load_pdf(f.read(),f.name)
+                kb.load_pdf(f.read(),f.name)
 
-            if ok:
-                st.success(f"{f.name} добавлен")
-
-
-# ---------------- DOC LIST ----------------
-
-if kb.files:
-
-    st.subheader("📚 Документы")
-
-    for d in kb.files:
-        st.write("•",d)
-
-else:
-
-    st.info("Загрузите PDF")
+            st.success(f"{f.name} added")
 
 
-# ---------------- CHAT HISTORY ----------------
+# ---------- CHAT HISTORY ----------
 
 for m in st.session_state.messages:
 
     with st.chat_message(m["role"]):
+
         st.markdown(m["content"])
 
 
-# ---------------- CHAT INPUT ----------------
+# ---------- CHAT ----------
 
-if prompt:=st.chat_input("Введите вопрос"):
+if prompt:=st.chat_input("Ask question"):
 
     st.session_state.messages.append({"role":"user","content":prompt})
 
+    memory.add(prompt)
+
     with st.chat_message("user"):
+
         st.markdown(prompt)
 
     start=datetime.now()
 
-    with st.spinner("🔎 Поиск информации..."):
+    route=route_query(prompt)
 
-        chunks=kb.retrieve(prompt)
+    context=""
 
-    if not chunks:
+    if route=="DOCUMENT" and self_rag(prompt):
 
-        answer="Ответ не найден в материалах."
+        with st.spinner("Searching documents..."):
 
-    else:
+            docs=kb.retrieve(prompt)
 
-        context=kb.compress(chunks)
+        context+="\n".join(docs)
 
-        sources="\n".join([f"{c.doc} стр.{c.page}" for c in chunks])
+    if route=="CONVERSATION":
 
-        prompt_llm=f"""
-Answer ONLY using materials.
+        mem=memory.search(prompt)
+
+        context+="\n".join(mem)
+
+    llm_prompt=f"""
+Answer the question.
+
+Context:
+{context}
 
 Question:
 {prompt}
-
-Materials:
-{context}
 """
 
-        data={
-        "model":"deepseek-chat",
-        "messages":[{"role":"user","content":prompt_llm}],
-        "temperature":0.1,
-        "max_tokens":900
-        }
+    data={
+    "model":"deepseek-chat",
+    "messages":[{"role":"user","content":llm_prompt}],
+    "temperature":0.1
+    }
 
-        with st.spinner("🤖 Генерация ответа..."):
+    with st.spinner("AI thinking..."):
 
-            try:
+        r=requests.post(url,headers=headers,json=data)
 
-                r=requests.post(url,headers=headers,json=data,timeout=60)
+        answer=r.json()['choices'][0]['message']['content']
 
-                answer=r.json()['choices'][0]['message']['content']
-
-            except:
-                answer="Ошибка AI."
-
-
-        answer+=f"\n\nИсточники:\n{sources}"
-
+    memory.add(answer)
 
     st.session_state.messages.append({"role":"assistant","content":answer})
 
@@ -1066,30 +1013,14 @@ Materials:
 
         placeholder=st.empty()
 
-        text=""
+        txt=""
 
         for w in answer.split():
 
-            text+=w+" "
+            txt+=w+" "
 
-            placeholder.markdown(text)
-
-        st.markdown(answer)
+            placeholder.markdown(txt)
 
     end=datetime.now()
 
-    st.info(f"⏱ {(end-start).total_seconds():.2f} сек")
-
-
-# ---------------- CLEAR ----------------
-
-if st.button("Очистить чат"):
-
-    st.session_state.messages=[]
-    st.rerun()
-
-
-if st.button("Удалить документы"):
-
-    st.session_state.kb=KnowledgeBase()
-    st.rerun()
+    st.info(f"⏱ {(end-start).total_seconds():.2f} sec")
