@@ -703,47 +703,47 @@ class KnowledgeBase:
         return chunks
 
     def load_pdf(self, data, name):
-    tmp = None
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as t:
-            t.write(data)
-            tmp = t.name
-        reader = PdfReader(tmp)
-        new_chunks, new_texts = [], []
-        for page in reader.pages:
-            text = page.extract_text()
-            if text:
-                for c in self.split_text(text):
-                    new_chunks.append(c)
-                    new_texts.append(c)
-        if not new_chunks:
-            return False
-
-        emb = embedder.encode(new_texts)
-        vectors = np.array(emb).astype("float32")
-        dim = vectors.shape[1]
-
-        # ------------------ FAISS IVFFlat ------------------
-        nlist_train = min(self.nlist, len(vectors))  # <= число векторов
-        if self.index is None:
-            quantizer = faiss.IndexFlatL2(dim)
-            self.index = faiss.IndexIVFFlat(quantizer, dim, nlist_train, faiss.METRIC_L2)
-            if len(vectors) >= nlist_train:
-                self.index.train(vectors)
-        elif not self.index.is_trained:
-            if len(vectors) >= nlist_train:
-                self.index.train(vectors)
-
-        self.index.add(vectors)
-
-        self.chunks += new_chunks
-        self.texts += new_texts
-        self.tfidf = self.vectorizer.fit_transform(self.texts)
-        self.files.append(name)
-        return True
-    finally:
-        if tmp and os.path.exists(tmp):
-            os.remove(tmp)
+        tmp = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as t:
+                t.write(data)
+                tmp = t.name
+            reader = PdfReader(tmp)
+            new_chunks, new_texts = [], []
+            for page in reader.pages:
+                text = page.extract_text()
+                if text:
+                    for c in self.split_text(text):
+                        new_chunks.append(c)
+                        new_texts.append(c)
+            if not new_chunks:
+                return False
+    
+            emb = embedder.encode(new_texts)
+            vectors = np.array(emb).astype("float32")
+            dim = vectors.shape[1]
+    
+            # ------------------ FAISS IVFFlat ------------------
+            nlist_train = min(self.nlist, len(vectors))  # <= число векторов
+            if self.index is None:
+                quantizer = faiss.IndexFlatL2(dim)
+                self.index = faiss.IndexIVFFlat(quantizer, dim, nlist_train, faiss.METRIC_L2)
+                if len(vectors) >= nlist_train:
+                    self.index.train(vectors)
+            elif not self.index.is_trained:
+                if len(vectors) >= nlist_train:
+                    self.index.train(vectors)
+    
+            self.index.add(vectors)
+    
+            self.chunks += new_chunks
+            self.texts += new_texts
+            self.tfidf = self.vectorizer.fit_transform(self.texts)
+            self.files.append(name)
+            return True
+        finally:
+            if tmp and os.path.exists(tmp):
+                os.remove(tmp)
 
     def semantic(self, query, k=5):
         if self.index is None or not self.chunks:
