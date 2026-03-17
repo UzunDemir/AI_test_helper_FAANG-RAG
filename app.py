@@ -364,9 +364,13 @@ if prompt:=st.chat_input("Введите вопрос"):
     with st.chat_message("user"):
         st.markdown(prompt)
 
+    #start=datetime.now()
     start=datetime.now()
 
-    chunks=kb.retrieve(prompt)
+    with st.spinner("🔎 AI анализирует материалы..."):
+        chunks = kb.retrieve(prompt)
+
+    #chunks=kb.retrieve(prompt)
 
     if not chunks:
 
@@ -403,9 +407,15 @@ Materials:
         "max_tokens":1000
         }
 
-        r=requests.post(url,headers=headers,json=data,timeout=60)
+        # r=requests.post(url,headers=headers,json=data,timeout=60)
 
-        answer=r.json()['choices'][0]['message']['content']
+        # answer=r.json()['choices'][0]['message']['content']
+
+        with st.spinner("🤖 AI формирует ответ..."):
+
+            r=requests.post(url,headers=headers,json=data,timeout=60)
+        
+            answer=r.json()['choices'][0]['message']['content']
 
         sources="\n\nИсточники:\n"
 
