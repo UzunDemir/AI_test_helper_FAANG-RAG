@@ -409,7 +409,9 @@ if prompt:=st.chat_input("Введите вопрос"):
     start=datetime.now()
 
     with st.spinner("🔎 AI анализирует материалы..."):
-        chunks = kb.retrieve(prompt)
+        
+        #chunks = kb.retrieve(prompt)
+        chunks=cached_retrieve(prompt)
 
     #chunks=kb.retrieve(prompt)
 
