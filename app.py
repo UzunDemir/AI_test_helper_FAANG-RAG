@@ -982,15 +982,23 @@ if prompt := st.chat_input("Ask question"):
 
     if route == "DOCUMENT" and self_rag(prompt):
         with st.spinner("Searching documents..."):
-            docs = kb.retrieve(prompt)
-            if docs:
-                context += "\n".join(docs)
+            context_chunks = kb.retrieve(prompt)  # список вида ["[file1.pdf | page 3]", "[file2.pdf | page 7]"]
+            if context_chunks:
+                context_text = "\n".join(context_chunks)
     elif route == "CONVERSATION":
         mem = memory.search(prompt)
         if mem:
-            context += "\n".join(mem)
-
-    llm_prompt = f"Answer the question.\n\nContext:\n{context}\n\nQuestion:\n{prompt}"
+            context_text = "\n".join(mem)
+    
+    llm_prompt = f"""
+    Answer the question.
+    
+    Context (document name and page only):
+    {context_text}
+    
+    Question:
+    {prompt}
+    """
     data = {"model":"deepseek-chat","messages":[{"role":"user","content":llm_prompt}],"temperature":0.1}
 
     with st.spinner("AI thinking..."):
