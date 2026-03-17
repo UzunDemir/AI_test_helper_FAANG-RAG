@@ -196,17 +196,39 @@ class KnowledgeBase:
                 result.append(f"[{file} | page {page}]")
         return result
 
-    def retrieve(self, query, top_k=4):
-        sem = self.semantic(query)
-        key = self.keyword(query)
-        unique = list({t for t in sem + key if t.strip()})
-        if not unique:
-            return []
-        pairs = [[query, t] for t in unique]
-        scores = reranker.predict(pairs)
-        ranked = sorted(zip(unique, scores), key=lambda x: x[1], reverse=True)
-        st.session_state.reranker_log = [(text, float(score)) for text, score in ranked]
-        return [x[0] for x in ranked[:top_k]]
+    # def retrieve(self, query, top_k=4):
+    #     sem = self.semantic(query)
+    #     key = self.keyword(query)
+    #     unique = list({t for t in sem + key if t.strip()})
+    #     if not unique:
+    #         return []
+    #     pairs = [[query, t] for t in unique]
+    #     scores = reranker.predict(pairs)
+    #     ranked = sorted(zip(unique, scores), key=lambda x: x[1], reverse=True)
+    #     st.session_state.reranker_log = [(text, float(score)) for text, score in ranked]
+    #     return [x[0] for x in ranked[:top_k]]
+####################################################################
+
+
+def retrieve(self, query, top_k=4):
+    sem = self.semantic(query)
+    key = self.keyword(query)
+    unique_chunks = list({t for t in sem + key if t.strip()})
+    if not unique_chunks:
+        return []
+    pairs = [[query, t] for t in unique_chunks]
+    scores = reranker.predict(pairs)
+    ranked = sorted(zip(unique_chunks, scores), key=lambda x: x[1], reverse=True)
+    st.session_state.reranker_log = [(t[:50]+"...", float(s)) for t, s in ranked]
+    
+    # вернем список вида: ("текст", "file.pdf | page X")
+    result = []
+    for t, _ in ranked[:top_k]:
+        for chunk_text, file, page in self.chunks:
+            if t == chunk_text:
+                result.append((t, f"{file} | page {page}"))
+                break
+    return result
 
 # ---------- SELF-RAG ----------
 @lru_cache(maxsize=128)
