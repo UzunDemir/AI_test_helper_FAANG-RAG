@@ -866,9 +866,10 @@ class KnowledgeBase:
             if idx < len(self.chunks):
                 text, file, page = self.chunks[idx]
                 if text.strip():
-                    result.append(f"[{file} | page {page}] {text}")
+                    # возвращаем только file и page, не текст
+                    result.append(f"[{file} | page {page}]")
         return result
-
+    
     def keyword(self, query, k=5):
         if self.tfidf is None or not self.chunks:
             return []
@@ -880,7 +881,7 @@ class KnowledgeBase:
             if i < len(self.chunks):
                 text, file, page = self.chunks[i]
                 if text.strip():
-                    result.append(f"[{file} | page {page}] {text}")
+                    result.append(f"[{file} | page {page}]")
         return result
 
     def retrieve(self, query, top_k=4):
