@@ -670,7 +670,7 @@ class ConversationMemory:
         self.messages.append(text)
         if len(self.messages) > self.max_messages:
             self.messages.pop(0)
-            self.embeddings = np.vstack([embedder.encode(self.messages)])  # Rebuild embeddings
+            self.embeddings = np.vstack([embedder.encode(self.messages)])
 
     def search(self, query, k=3):
         if self.embeddings is None or not self.messages:
@@ -682,13 +682,14 @@ class ConversationMemory:
 
 # ---------- KNOWLEDGE BASE ----------
 class KnowledgeBase:
-    def __init__(self):
+    def __init__(self, nlist=100):
         self.chunks = []
         self.texts = []
         self.files = []
         self.index = None
         self.vectorizer = TfidfVectorizer()
         self.tfidf = None
+        self.nlist = nlist  # FAISS cluster count
 
     def split_text(self, text, chunk_size=800, overlap=150):
         words = text.split()
@@ -717,12 +718,20 @@ class KnowledgeBase:
                         new_texts.append(c)
             if not new_chunks:
                 return False
+
             emb = embedder.encode(new_texts)
             vectors = np.array(emb).astype("float32")
+            dim = vectors.shape[1]
+
+            # ------------------ FAISS IVFFlat ------------------
             if self.index is None:
-                dim = vectors.shape[1]
-                self.index = faiss.IndexFlatL2(dim)
+                quantizer = faiss.IndexFlatL2(dim)
+                self.index = faiss.IndexIVFFlat(quantizer, dim, self.nlist, faiss.METRIC_L2)
+                self.index.train(vectors)
+            elif not self.index.is_trained:
+                self.index.train(vectors)
             self.index.add(vectors)
+
             self.chunks += new_chunks
             self.texts += new_texts
             self.tfidf = self.vectorizer.fit_transform(self.texts)
@@ -760,7 +769,6 @@ class KnowledgeBase:
         pairs = [[query, t] for t in unique]
         scores = reranker.predict(pairs)
         ranked = sorted(zip(unique, scores), key=lambda x: x[1], reverse=True)
-        # Debug log
         st.session_state.reranker_log = [(text[:50]+"...", float(score)) for text, score in ranked]
         return [x[0] for x in ranked[:top_k]]
 
@@ -811,7 +819,7 @@ Answer with one word.
 
 # ---------- SESSION ----------
 if "kb" not in st.session_state:
-    st.session_state.kb = KnowledgeBase()
+    st.session_state.kb = KnowledgeBase(nlist=200)  # увеличиваем nlist для огромной базы
 if "memory" not in st.session_state:
     st.session_state.memory = ConversationMemory(max_messages=50)
 if "messages" not in st.session_state:
@@ -872,7 +880,6 @@ if prompt := st.chat_input("Ask question"):
 
     with st.chat_message("assistant"):
         placeholder = st.empty()
-        # Render by paragraph to speed up long answers
         for para in answer.split("\n"):
             placeholder.markdown(para)
     
@@ -888,6 +895,6 @@ if st.button("Clear chat"):
     st.session_state.messages = []
     st.rerun()
 if st.button("Remove documents"):
-    st.session_state.kb = KnowledgeBase()
+    st.session_state.kb = KnowledgeBase(nlist=200)
     st.session_state.memory = ConversationMemory(max_messages=50)
     st.rerun()
