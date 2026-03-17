@@ -631,6 +631,24 @@ Features:
 • Memory Retrieval  
 """)
 
+
+# ---------------- HEADER ----------------
+
+st.markdown("""
+<div class="center">
+
+<img src="https://github.com/UzunDemir/mnist_777/blob/main/200w.gif?raw=true">
+
+<h1>TEST-passer</h1>
+<h2>AI ассистент по тестам</h2>
+
+<p>Ответы строго по учебным материалам</p>
+
+</div>
+""", unsafe_allow_html=True)
+
+st.divider()
+
 # ---------- MODELS ----------
 @st.cache_resource
 def load_embedder():
