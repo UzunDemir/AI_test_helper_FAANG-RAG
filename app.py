@@ -454,9 +454,25 @@ Materials:
 
         with st.spinner("🤖 AI формирует ответ..."):
 
-            r=requests.post(url,headers=headers,json=data,timeout=60)
+            # r=requests.post(url,headers=headers,json=data,timeout=60)
         
-            answer=r.json()['choices'][0]['message']['content']
+            # answer=r.json()['choices'][0]['message']['content']
+
+            try:
+
+                r=requests.post(url,headers=headers,json=data,timeout=60)
+            
+                if r.status_code==200:
+                    answer=r.json()['choices'][0]['message']['content']
+                else:
+                    answer="⚠️ Ошибка AI сервера"
+            
+            except Exception:
+                answer="⚠️ Ошибка соединения с AI"
+
+
+
+            
 
         # sources="\n\nИсточники:\n"
 
